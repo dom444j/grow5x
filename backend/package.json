@@ -1,0 +1,48 @@
+{
+  "name": "grow5x-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Grow5X platform",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "seed:admin": "node scripts/seed-admin.js",
+    "seed:packages": "node scripts/seed-packages.js",
+    "seed:wallets": "node scripts/seed-wallets.js",
+    "seed:all": "npm run seed:admin && npm run seed:packages && npm run seed:wallets",
+    "telegram:setup": "node src/scripts/setup-telegram-webhook.js setup",
+    "telegram:status": "node src/scripts/setup-telegram-webhook.js status",
+    "telegram:delete": "node src/scripts/setup-telegram-webhook.js delete"
+  },
+  "keywords": [
+    "grow5x",
+    "api",
+    "backend",
+    "trading"
+  ],
+  "author": "Grow5X Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.10",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.3",
+    "node-cron": "^3.0.3",
+    "pino": "^8.17.2",
+    "pino-pretty": "^10.3.1",
+    "rate-limiter-flexible": "^4.0.1",
+    "telegraf": "^4.15.6",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.2.0",
+    "nodemon": "^3.0.2"
+  }
+}
