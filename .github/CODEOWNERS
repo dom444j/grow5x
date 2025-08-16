@@ -1,8 +1,8 @@
 # .github/CODEOWNERS
 # Archivos sensibles del sistema de comisiones requieren revisión obligatoria
 
-/grow5x/backend/scripts/seed-*.js    @dom444j
-/grow5x/backend/src/config/commissions.js  @dom444j
+/backend/scripts/seed-*.js    @dom444j
+/backend/src/config/commissions.js  @dom444j
 /docs/LOGICA-COMISIONES.md    @dom444j
 /LOGICA-COMISIONES.md    @dom444j
-/grow5x/backend/src/utils/integrity-checks.js  @dom444j
+/backend/src/utils/integrity-checks.js  @dom444j

@@ -8,5 +8,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: cd grow5x/backend && npm ci --omit=dev
-      - run: node grow5x/backend/src/utils/integrity-checks.js
+      - run: cd backend && npm ci --omit=dev
+      - run: node backend/src/utils/integrity-checks.js
