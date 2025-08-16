@@ -162,6 +162,10 @@ class Server {
       // Connect to database
       await database.connect();
       
+      // Run integrity checks before starting server
+      const { runIntegrityChecks } = require('./utils/integrity-checks');
+      await runIntegrityChecks();
+      
       // Start server
       this.server = this.app.listen(this.port, () => {
         logger.info(`🚀 Server running on port ${this.port}`);

@@ -6,6 +6,8 @@
 const express = require('express');
 const { z } = require('zod');
 const { Purchase, User, Commission, Transaction, Package, Wallet } = require('../models');
+const { COMMISSIONS } = require('../config/commissions');
+const dayjs = require('dayjs');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const logger = require('../config/logger');
 
@@ -298,7 +300,6 @@ async function confirmPurchase(purchase, admin, notes) {
  */
 async function createCommissions(purchase, session) {
   const user = await User.findById(purchase.user._id).session(session);
-  const package = await Package.findById(purchase.package._id).session(session);
   
   if (!user.referredBy) {
     logger.debug('User has no referrer, skipping commission creation', {
@@ -308,48 +309,86 @@ async function createCommissions(purchase, session) {
     return;
   }
   
-  // Build referral chain (up to 5 levels)
-  const referralChain = [];
-  let currentUser = user;
-  
-  for (let level = 1; level <= 5; level++) {
-    if (!currentUser.referredBy) break;
-    
-    const referrer = await User.findById(currentUser.referredBy).session(session);
-    if (!referrer || !referrer.isActive) break;
-    
-    referralChain.push({
-      level,
-      user: referrer,
-      rate: package.commissionRates[`level${level}`] || 0
+  // Obtener referidor directo
+  const directReferrer = await User.findById(user.referredBy).session(session);
+  if (!directReferrer || !directReferrer.isActive) {
+    logger.debug('Direct referrer not found or inactive', {
+      userId: user.userId,
+      referrerId: user.referredBy
     });
-    
-    currentUser = referrer;
+    return;
   }
   
-  // Create commission records
-  for (const chainItem of referralChain) {
-    if (chainItem.rate > 0) {
-      await Commission.createCommission(
-        chainItem.user._id,
-        user._id,
-        purchase._id,
-        package._id,
-        chainItem.level,
-        chainItem.rate,
-        purchase.totalAmount,
-        purchase.currency,
-        referralChain.map(item => item.user._id),
-        session
-      );
+  const commissions = [];
+  
+  // 1. Comisión directa (10%)
+  const directAmount = (purchase.totalAmount * COMMISSIONS.DIRECT_PERCENT) / 100;
+  const directUnlockDate = dayjs().add(COMMISSIONS.DIRECT_UNLOCK_DAYS, 'day').toDate();
+  
+  const directCommission = new Commission({
+    recipientUserId: directReferrer._id,
+    sourceUserId: user._id,
+    purchaseId: purchase._id,
+    packageId: purchase.package._id,
+    type: 'direct_referral',
+    rate: COMMISSIONS.DIRECT_PERCENT / 100,
+    baseAmount: purchase.totalAmount,
+    commissionAmount: directAmount,
+    currency: purchase.currency,
+    unlockDate: directUnlockDate,
+    metadata: {
+      commissionType: 'direct_referral',
+      unlockDays: COMMISSIONS.DIRECT_UNLOCK_DAYS
     }
+  });
+  
+  commissions.push(directCommission);
+  
+  // 2. Comisión padre (10%) - solo si el referidor directo tiene su primer referido
+  const referrerPurchases = await Purchase.countDocuments({
+    user: directReferrer._id,
+    status: 'completed'
+  }).session(session);
+  
+  if (referrerPurchases === 0 && directReferrer.referredBy) {
+    const parentReferrer = await User.findById(directReferrer.referredBy).session(session);
+    
+    if (parentReferrer && parentReferrer.isActive) {
+      const parentAmount = (purchase.totalAmount * COMMISSIONS.PARENT_PERCENT) / 100;
+      const parentUnlockDate = dayjs().add(COMMISSIONS.PARENT_UNLOCK_DAYS, 'day').toDate();
+      
+      const parentCommission = new Commission({
+        recipientUserId: parentReferrer._id,
+        sourceUserId: user._id,
+        purchaseId: purchase._id,
+        packageId: purchase.package._id,
+        type: 'parent_bonus',
+        rate: COMMISSIONS.PARENT_PERCENT / 100,
+        baseAmount: purchase.totalAmount,
+        commissionAmount: parentAmount,
+        currency: purchase.currency,
+        unlockDate: parentUnlockDate,
+        metadata: {
+          commissionType: 'parent_bonus',
+          unlockDays: COMMISSIONS.PARENT_UNLOCK_DAYS,
+          isFirstActivation: true
+        }
+      });
+      
+      commissions.push(parentCommission);
+    }
+  }
+  
+  // Guardar todas las comisiones
+  for (const commission of commissions) {
+    await commission.save({ session });
   }
   
   logger.info('Commissions created for purchase', {
     purchaseId: purchase.purchaseId,
     userId: user.userId,
-    chainLength: referralChain.length,
-    totalCommissionLevels: referralChain.filter(item => item.rate > 0).length
+    commissionsCreated: commissions.length,
+    types: commissions.map(c => c.type)
   });
 }
 

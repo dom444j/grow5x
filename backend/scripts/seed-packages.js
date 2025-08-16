@@ -17,19 +17,12 @@ const PACKAGES_CONFIG = [
     dailyBenefitRate: 0.125, // 12.5%
     benefitDays: 8,
     totalCycles: 5,
-    commissionRates: {
-      level1: 0.10, // 10%
-      level2: 0.05, // 5%
-      level3: 0.03, // 3%
-      level4: 0.02, // 2%
-      level5: 0.01  // 1%
-    },
     description: 'Licencia de entrada perfecta para comenzar tu journey en trading automatizado',
     features: [
       'Acceso completo al sistema de trading',
       'Beneficios diarios del 12.5%',
       '8 días por ciclo, 5 ciclos totales',
-      'Comisiones de referidos hasta nivel 5',
+      'Comisiones simplificadas: directa (10%) y padre (10%)',
       'Soporte técnico incluido',
       'Dashboard personalizado'
     ],
@@ -46,19 +39,12 @@ const PACKAGES_CONFIG = [
     dailyBenefitRate: 0.125, // 12.5%
     benefitDays: 8,
     totalCycles: 5,
-    commissionRates: {
-      level1: 0.10, // 10%
-      level2: 0.05, // 5%
-      level3: 0.03, // 3%
-      level4: 0.02, // 2%
-      level5: 0.01  // 1%
-    },
     description: 'Licencia premium con mayor capital y mejores retornos para traders experimentados',
     features: [
       'Acceso VIP al sistema de trading',
       'Beneficios diarios del 12.5%',
       '8 días por ciclo, 5 ciclos totales',
-      'Comisiones de referidos hasta nivel 5',
+      'Comisiones simplificadas: directa (10%) y padre (10%)',
       'Soporte prioritario 24/7',
       'Dashboard avanzado con analytics',
       'Acceso a estrategias premium',

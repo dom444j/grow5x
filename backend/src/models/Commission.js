@@ -34,11 +34,10 @@ const commissionSchema = new mongoose.Schema({
   },
   
   // Commission Details
-  level: {
-    type: Number,
+  type: {
+    type: String,
     required: true,
-    min: 1,
-    max: 5
+    enum: ['direct_referral', 'parent_bonus']
   },
   rate: {
     type: Number,
@@ -97,16 +96,11 @@ const commissionSchema = new mongoose.Schema({
   },
   
   // Referral Chain Information
-  referralChain: [{
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    level: {
-      type: Number,
-      min: 0
-    }
-  }]
+  // Información adicional para debugging
+  metadata: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  }
 }, {
   timestamps: true
 });
@@ -116,7 +110,7 @@ commissionSchema.index({ commissionId: 1 });
 commissionSchema.index({ recipientUserId: 1, status: 1 });
 commissionSchema.index({ sourceUserId: 1 });
 commissionSchema.index({ purchaseId: 1 });
-commissionSchema.index({ level: 1 });
+commissionSchema.index({ type: 1 });
 commissionSchema.index({ status: 1, unlockDate: 1 });
 commissionSchema.index({ createdAt: 1 });
 commissionSchema.index({ unlockDate: 1 });
