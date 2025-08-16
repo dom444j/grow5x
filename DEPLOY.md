@@ -1,5 +1,61 @@
 # 🚀 Despliegue — VPS con Nginx + PM2 + Atlas ONLY
 
+## 🗄️ Configuración de MongoDB Atlas - GrowX5
+
+### Información General
+
+**Cluster:** `grow5x-cluster.nufwbrc.mongodb.net`  
+**Base de Datos:** `growx5`  
+**Región:** `AWS / US East (N. Virginia)`  
+**Tier:** `M0 Sandbox (Free)`  
+**Versión MongoDB:** `7.0`  
+
+### Configuración de Producción
+
+Las credenciales de MongoDB Atlas están configuradas en el archivo `.env` del VPS:
+```
+/root/grow5x-oficial/backend/.env
+```
+
+**Variable de entorno requerida:**
+```bash
+MONGODB_URI=mongodb+srv://[usuario]:[contraseña]@grow5x-cluster.nufwbrc.mongodb.net/growx5?retryWrites=true&w=majority&appName=grow5x-cluster
+```
+
+### Configuración de Seguridad
+- **Network Access:** Solo IP del VPS permitida (`80.78.25.79/32`)
+- **Database Access:** Usuario dedicado con permisos mínimos necesarios
+- **Backup:** Habilitado automáticamente
+- **Monitoring:** Disponible en dashboard de Atlas
+
+### Verificación de Conexión
+Para verificar que la conexión funciona:
+```bash
+# Health check local
+curl http://localhost:5000/api/health
+
+# Health check externo
+curl https://grow5x.app/api/health
+```
+
+Respuesta esperada:
+```json
+{
+  "status": "ok",
+  "environment": "production",
+  "database": "connected",
+  "dbState": {
+    "readyState": 1,
+    "host": "ac-t81ouqo-shard-00-01.nufwbrc.mongodb.net",
+    "name": "growx5"
+  }
+}
+```
+
+---
+
+**⚠️ Seguridad:** Las credenciales reales se mantienen únicamente en el archivo `.env` del servidor de producción. Nunca incluir credenciales en el repositorio.
+
 ## 🌐 Información del VPS
 - **IP IPv4**: 80.78.25.79
 - **IP IPv6**: 2a0a:3840:8078:25::504e:194f:1337
