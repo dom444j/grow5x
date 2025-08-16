@@ -4,8 +4,10 @@
   "description": "Backend API for Grow5X platform",
   "main": "src/server.js",
   "scripts": {
+    "prestart": "node src/utils/integrity-checks.js",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "ci:guard": "node src/utils/integrity-checks.js",
     "seed:admin": "node scripts/seed-admin.js",
     "seed:packages": "node scripts/seed-packages.js",
     "seed:wallets": "node scripts/seed-wallets.js",
