@@ -5,4 +5,6 @@
 /backend/src/config/commissions.js  @dom444j
 /docs/LOGICA-COMISIONES.md    @dom444j
 /LOGICA-COMISIONES.md    @dom444j
+
+# Archivos de seguridad críticos
 /backend/src/utils/integrity-checks.js  @dom444j
