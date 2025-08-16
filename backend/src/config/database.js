@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 const { assertAtlasConnection } = require('./atlas-assert');
-const memoryDatabase = require('./database-memory');
+
+// Only import memory database in development
+let memoryDatabase = null;
+if (process.env.NODE_ENV === 'development') {
+  memoryDatabase = require('./database-memory');
+}
 
 class DatabaseConnection {
   constructor() {
@@ -10,7 +15,7 @@ class DatabaseConnection {
   async connect() {
     try {
       // Use memory database for development
-      if (process.env.NODE_ENV === 'development') {
+      if (process.env.NODE_ENV === 'development' && memoryDatabase) {
         await memoryDatabase.connect();
         this.isConnected = true;
         return;
@@ -67,7 +72,7 @@ class DatabaseConnection {
 
   async disconnect() {
     try {
-      if (process.env.NODE_ENV === 'development') {
+      if (process.env.NODE_ENV === 'development' && memoryDatabase) {
         await memoryDatabase.disconnect();
         this.isConnected = false;
         return;
