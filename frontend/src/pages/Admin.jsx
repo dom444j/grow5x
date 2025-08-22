@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { apiService, apiUtils } from '../services/api'
 import { toast } from 'react-hot-toast'
-import Header from '../components/Header'
-import Footer from '../components/Footer'
+import AdminHeader from '../components/home/AdminHeader'
+import Footer from '../components/home/Footer'
 
 const Admin = () => {
   const { user, isAdmin } = useAuth()
@@ -158,7 +158,7 @@ const Admin = () => {
   if (!isAdmin()) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-secondary-50">
-        <Header />
+        <AdminHeader />
         <main className="section-padding">
           <div className="container-max">
             <div className="text-center py-16">

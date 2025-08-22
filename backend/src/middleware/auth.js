@@ -13,8 +13,12 @@ const logger = require('../config/logger');
  */
 const authenticateToken = async (req, res, next) => {
   try {
+    // Try to get token from cookie first, then from Authorization header
+    const cookieToken = req.cookies?.access_token;
     const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const bearerToken = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    
+    const token = cookieToken || bearerToken;
     
     if (!token) {
       return res.status(401).json({
@@ -27,8 +31,8 @@ const authenticateToken = async (req, res, next) => {
     // Verify JWT token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Find user by ID
-    const user = await User.findById(decoded.userId).select('-password');
+    // Find user by custom userId field
+    const user = await User.findOne({ userId: decoded.userId }).select('-password');
     
     if (!user) {
       return res.status(401).json({
@@ -56,9 +60,21 @@ const authenticateToken = async (req, res, next) => {
       });
     }
     
+    // Check token version for session invalidation
+    const tokenVersion = decoded.tokenVersion || 0;
+    const userTokenVersion = user.tokenVersion || 0;
+    
+    if (tokenVersion !== userTokenVersion) {
+      return res.status(401).json({
+        success: false,
+        message: 'Sesión invalidada. Por favor, inicia sesión nuevamente',
+        code: 'TOKEN_INVALIDATED'
+      });
+    }
+    
     // Attach user to request
     req.user = user;
-    req.userId = user._id;
+    req.userId = user.userId; // Keep userId for requireAdmin middleware
     
     // Log successful authentication
     logger.debug('User authenticated successfully', {
@@ -102,61 +118,8 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-/**
- * Admin Role Middleware
- * Requires user to be authenticated and have admin role
- */
-const requireAdmin = async (req, res, next) => {
-  try {
-    // First check if user is authenticated
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Autenticación requerida',
-        code: 'AUTHENTICATION_REQUIRED'
-      });
-    }
-    
-    // Check if user has admin role
-    if (req.user.role !== 'admin') {
-      logger.warn('Unauthorized admin access attempt', {
-        userId: req.user.userId,
-        email: req.user.email,
-        role: req.user.role,
-        ip: req.ip,
-        path: req.path
-      });
-      
-      return res.status(403).json({
-        success: false,
-        message: 'Acceso denegado - Se requieren permisos de administrador',
-        code: 'ADMIN_REQUIRED'
-      });
-    }
-    
-    logger.debug('Admin access granted', {
-      userId: req.user.userId,
-      email: req.user.email,
-      ip: req.ip,
-      path: req.path
-    });
-    
-    next();
-    
-  } catch (error) {
-    logger.error('Admin authorization error:', {
-      error: error.message,
-      userId: req.user?.userId,
-      ip: req.ip
-    });
-    
-    return res.status(500).json({
-      success: false,
-      message: 'Error interno del servidor',
-      code: 'INTERNAL_ERROR'
-    });
-  }
-};
+// Import the unified requireAdmin middleware
+const requireAdmin = require('./requireAdmin');
 
 /**
  * Optional Authentication Middleware
@@ -164,8 +127,12 @@ const requireAdmin = async (req, res, next) => {
  */
 const optionalAuth = async (req, res, next) => {
   try {
+    // Try to get token from cookie first, then from Authorization header
+    const cookieToken = req.cookies?.access_token;
     const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
+    const bearerToken = authHeader && authHeader.split(' ')[1];
+    
+    const token = cookieToken || bearerToken;
     
     if (!token) {
       // No token provided, continue without user
@@ -175,8 +142,8 @@ const optionalAuth = async (req, res, next) => {
     // Verify JWT token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Find user by ID
-    const user = await User.findById(decoded.userId).select('-password');
+    // Find user by userId field (not MongoDB _id)
+    const user = await User.findOne({ userId: decoded.userId }).select('-password');
     
     if (user && user.isActive) {
       req.user = user;
@@ -202,9 +169,10 @@ const optionalAuth = async (req, res, next) => {
  */
 const generateToken = (user) => {
   const payload = {
-    userId: user._id,
+    userId: user.userId,
     email: user.email,
-    role: user.role
+    role: user.role,
+    tokenVersion: user.tokenVersion || 0
   };
   
   const options = {

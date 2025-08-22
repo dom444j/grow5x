@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
+const { DecimalCalc } = require('../utils/decimal');
+const { getCommissions } = require('../config/commissions');
 
 const commissionSchema = new mongoose.Schema({
   // Commission Identification
@@ -21,6 +23,16 @@ const commissionSchema = new mongoose.Schema({
     required: true
   },
   
+  // Alias fields for compatibility with frontend
+  earner: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  referredUser: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  
   // Purchase Information
   purchaseId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -33,17 +45,38 @@ const commissionSchema = new mongoose.Schema({
     required: true
   },
   
+  // Alias fields for compatibility with frontend
+  relatedPurchase: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Purchase'
+  },
+  relatedPackage: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Package'
+  },
+  
   // Commission Details
   type: {
     type: String,
     required: true,
     enum: ['direct_referral', 'parent_bonus']
   },
+  level: {
+    type: Number,
+    required: true,
+    min: 1,
+    max: 5
+  },
   rate: {
     type: Number,
     required: true,
     min: 0,
     max: 1 // Percentage as decimal
+  },
+  commissionRate: {
+    type: Number,
+    min: 0,
+    max: 1
   },
   baseAmount: {
     type: Number,
@@ -68,12 +101,15 @@ const commissionSchema = new mongoose.Schema({
     default: 'pending'
   },
   
-  // Unlock timing (D+9 for level 1, D+17 for levels 2-5)
+  // Unlock timing (D+9 for level 1, D+18 for levels 2-5)
   unlockDate: {
     type: Date,
     required: true
   },
   paidDate: {
+    type: Date
+  },
+  unlockedAt: {
     type: Date
   },
   
@@ -139,6 +175,7 @@ commissionSchema.methods.unlock = function() {
   }
   
   this.status = 'available';
+  this.unlockedAt = new Date();
   return this.save();
 };
 
@@ -164,7 +201,7 @@ commissionSchema.methods.cancel = function(reason) {
 };
 
 // Static method to create commission
-commissionSchema.statics.createCommission = function(data) {
+commissionSchema.statics.createCommission = async function(data) {
   const {
     recipientUserId,
     sourceUserId,
@@ -176,8 +213,11 @@ commissionSchema.statics.createCommission = function(data) {
     referralChain = []
   } = data;
   
+  // Get commission configuration
+  const commissions = await getCommissions();
+  
   // Calculate unlock date based on level
-  const unlockDays = level === 1 ? 9 : 17;
+  const unlockDays = level === 1 ? commissions.DIRECT_UNLOCK_DAYS : commissions.PARENT_UNLOCK_DAYS;
   const unlockDate = new Date(Date.now() + unlockDays * 24 * 60 * 60 * 1000);
   
   return this.create({
@@ -188,7 +228,7 @@ commissionSchema.statics.createCommission = function(data) {
     level,
     rate,
     baseAmount,
-    commissionAmount: baseAmount * rate,
+    commissionAmount: DecimalCalc.calculateCommission(baseAmount, rate),
     unlockDate,
     referralChain
   });
@@ -289,11 +329,29 @@ commissionSchema.statics.getStatistics = function(options = {}) {
   ]);
 };
 
-// Pre-save middleware to calculate commission amount
+// Pre-save middleware to calculate commission amount and sync alias fields
 commissionSchema.pre('save', function(next) {
   if (this.isModified('baseAmount') || this.isModified('rate')) {
-    this.commissionAmount = this.baseAmount * this.rate;
+    this.commissionAmount = DecimalCalc.calculateCommission(this.baseAmount, this.rate);
   }
+  
+  // Sync alias fields for frontend compatibility
+  if (this.recipientUserId && !this.earner) {
+    this.earner = this.recipientUserId;
+  }
+  if (this.sourceUserId && !this.referredUser) {
+    this.referredUser = this.sourceUserId;
+  }
+  if (this.purchaseId && !this.relatedPurchase) {
+    this.relatedPurchase = this.purchaseId;
+  }
+  if (this.packageId && !this.relatedPackage) {
+    this.relatedPackage = this.packageId;
+  }
+  if (this.rate && !this.commissionRate) {
+    this.commissionRate = this.rate;
+  }
+  
   next();
 });
 

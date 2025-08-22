@@ -5,29 +5,23 @@
 
 const express = require('express');
 const { z } = require('zod');
-const rateLimit = require('express-rate-limit');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { adminLimiter } = require('../middleware/rateLimiter');
+const { auditMiddleware, captureOriginalState } = require('../middleware/audit');
 const Withdrawal = require('../models/Withdrawal');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const telegramService = require('../services/telegram');
+const { DecimalCalc } = require('../utils/decimal');
 const logger = require('../config/logger');
 const mongoose = require('mongoose');
+const transactionService = require('../services/transactionService');
+const realtimeSyncService = require('../services/realtimeSyncService');
+const { middleware: responseStandardizer } = require('../middleware/responseStandardizer');
 
 const router = express.Router();
 
-// Rate limiting for admin actions
-const adminActionLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30, // 30 requests per minute
-  message: {
-    success: false,
-    message: 'Demasiadas acciones administrativas. Intente nuevamente en un minuto.',
-    code: 'RATE_LIMIT_EXCEEDED'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-});
+
 
 // Apply admin authentication to all routes
 router.use(authenticateToken, requireAdmin);
@@ -35,7 +29,8 @@ router.use(authenticateToken, requireAdmin);
 // Validation schemas
 const approveWithdrawalSchema = z.object({
   withdrawalId: z.string().min(1, 'ID de retiro requerido'),
-  adminNotes: z.string().optional()
+  adminNotes: z.string().optional(),
+  processingTargetMinutes: z.number().min(0).optional()
 });
 
 const rejectWithdrawalSchema = z.object({
@@ -54,7 +49,7 @@ const completeWithdrawalSchema = z.object({
  * GET /api/admin/withdrawals
  * Get paginated list of withdrawals with filtering
  */
-router.get('/', async (req, res) => {
+router.get('/', responseStandardizer, async (req, res) => {
   try {
     const {
       page = 1,
@@ -67,8 +62,8 @@ router.get('/', async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const pageNum = DecimalCalc.max(1, parseInt(page));
+    const limitNum = DecimalCalc.min(100, DecimalCalc.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
     // Build filter
@@ -138,16 +133,21 @@ router.get('/', async (req, res) => {
       { $limit: limitNum }
     );
 
-    // Add projection
+    // Add projection with normalized field names
     pipeline.push({
       $project: {
         _id: 1,
-        amount: 1,
+        withdrawalId: 1,
+        id: '$withdrawalId', // Canonical id field
+        amountUSDT: '$amount', // Normalized amount field
+        amount: 1, // Keep for legacy compatibility
         currency: 1,
         network: 1,
         destinationAddress: 1,
-        status: 1,
+        toAddress: '$destinationAddress', // Canonical address field
+        status: { $toUpper: '$status' }, // Normalize to uppercase
         txHash: 1,
+        txId: '$txHash', // Canonical tx field
         adminNotes: 1,
         rejectionReason: 1,
         createdAt: 1,
@@ -164,26 +164,23 @@ router.get('/', async (req, res) => {
 
     const withdrawals = await Withdrawal.aggregate(pipeline);
 
-    const totalPages = Math.ceil(total / limitNum);
+    const totalPages = DecimalCalc.round(total / limitNum);
 
-    res.json({
-      success: true,
-      data: {
-        withdrawals,
-        pagination: {
-          currentPage: pageNum,
-          totalPages,
-          totalItems: total,
-          itemsPerPage: limitNum,
-          hasNextPage: pageNum < totalPages,
-          hasPrevPage: pageNum > 1
-        },
-        filters: {
-          status,
-          currency,
-          network,
-          search
-        }
+    res.success({
+      withdrawals,
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limitNum,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1
+      },
+      filters: {
+        status,
+        currency,
+        network,
+        search
       }
     });
 
@@ -195,11 +192,7 @@ router.get('/', async (req, res) => {
       query: req.query
     });
 
-    res.status(500).json({
-      success: false,
-      message: 'Error interno del servidor',
-      code: 'INTERNAL_ERROR'
-    });
+    res.error('Error interno del servidor', 500, 'INTERNAL_ERROR');
   }
 });
 
@@ -231,9 +224,19 @@ router.get('/:withdrawalId', async (req, res) => {
       });
     }
 
+    // Normalize withdrawal response
+    const normalizedWithdrawal = {
+      ...withdrawal,
+      id: withdrawal.withdrawalId || withdrawal._id.toString(),
+      amountUSDT: withdrawal.amount,
+      toAddress: withdrawal.destinationAddress,
+      status: withdrawal.status?.toUpperCase() || 'REQUESTED',
+      txId: withdrawal.txHash
+    };
+
     res.json({
       success: true,
-      data: { withdrawal }
+      data: { withdrawal: normalizedWithdrawal }
     });
 
   } catch (error) {
@@ -255,12 +258,16 @@ router.get('/:withdrawalId', async (req, res) => {
  * POST /api/admin/withdrawals/approve
  * Approve a withdrawal request
  */
-router.post('/approve', adminActionLimiter, async (req, res) => {
+router.post('/approve', 
+  captureOriginalState(Withdrawal, 'withdrawalId'),
+  auditMiddleware.withdrawalAction,
+  responseStandardizer,
+  async (req, res) => {
   const session = await mongoose.startSession();
   
   try {
     const validatedData = approveWithdrawalSchema.parse(req.body);
-    const { withdrawalId, adminNotes } = validatedData;
+    const { withdrawalId, adminNotes, processingTargetMinutes } = validatedData;
 
     if (!mongoose.Types.ObjectId.isValid(withdrawalId)) {
       return res.status(400).json({
@@ -280,6 +287,26 @@ router.post('/approve', adminActionLimiter, async (req, res) => {
         throw new Error('WITHDRAWAL_NOT_FOUND');
       }
 
+      // Check idempotency - if already approved, return success without changes
+      if (withdrawal.status === 'approved') {
+        logger.info('Withdrawal already approved - idempotent response', {
+          withdrawalId,
+          adminId: req.user.userId,
+          originalApprovedAt: withdrawal.approvedAt
+        });
+        
+        return res.json({
+          success: true,
+          message: 'Retiro ya aprobado previamente',
+          data: {
+            withdrawalId,
+            status: 'approved',
+            approvedAt: withdrawal.approvedAt,
+            idempotent: true
+          }
+        });
+      }
+
       if (withdrawal.status !== 'pending') {
         throw new Error('WITHDRAWAL_NOT_PENDING');
       }
@@ -291,8 +318,29 @@ router.post('/approve', adminActionLimiter, async (req, res) => {
       if (adminNotes) {
         withdrawal.adminNotes = adminNotes;
       }
+      
+      // Set processing target and ETA if provided
+      if (processingTargetMinutes) {
+        withdrawal.processingTargetMinutes = processingTargetMinutes;
+        withdrawal.processingETA = new Date(Date.now() + DecimalCalc.multiply(processingTargetMinutes, 60 * 1000));
+      }
 
       await withdrawal.save({ session });
+
+      // Emit real-time events
+      realtimeSyncService.emitUserUpdate(withdrawal.userId._id, {
+        type: 'withdrawal_approved',
+        withdrawalId,
+        status: 'approved',
+        approvedAt: withdrawal.approvedAt
+      });
+      
+      realtimeSyncService.emitAdminUpdate({
+        type: 'withdrawal_status_changed',
+        withdrawalId,
+        status: 'approved',
+        approvedBy: req.user.userId
+      });
 
       logger.info('Withdrawal approved by admin', {
         withdrawalId,
@@ -300,7 +348,9 @@ router.post('/approve', adminActionLimiter, async (req, res) => {
         amount: withdrawal.amount,
         currency: withdrawal.currency,
         adminId: req.user.userId,
-        adminNotes
+        adminNotes,
+        processingTargetMinutes,
+        processingETA: withdrawal.processingETA
       });
 
       // Send Telegram notification
@@ -321,15 +371,11 @@ router.post('/approve', adminActionLimiter, async (req, res) => {
       }
     });
 
-    res.json({
-      success: true,
-      message: 'Retiro aprobado exitosamente',
-      data: {
-        withdrawalId,
-        status: 'approved',
-        approvedAt: new Date().toISOString()
-      }
-    });
+    res.success({
+      withdrawalId,
+      status: 'approved',
+      approvedAt: new Date().toISOString()
+    }, 'Retiro aprobado exitosamente');
 
   } catch (error) {
     await session.abortTransaction();
@@ -380,7 +426,10 @@ router.post('/approve', adminActionLimiter, async (req, res) => {
  * POST /api/admin/withdrawals/reject
  * Reject a withdrawal request and return funds
  */
-router.post('/reject', adminActionLimiter, async (req, res) => {
+router.post('/reject', 
+  captureOriginalState(Withdrawal, 'withdrawalId'),
+  auditMiddleware.withdrawalAction,
+  async (req, res) => {
   const session = await mongoose.startSession();
   
   try {
@@ -403,6 +452,26 @@ router.post('/reject', adminActionLimiter, async (req, res) => {
 
       if (!withdrawal) {
         throw new Error('WITHDRAWAL_NOT_FOUND');
+      }
+
+      // Check idempotency - if already rejected, return success without changes
+      if (withdrawal.status === 'rejected') {
+        logger.info('Withdrawal already rejected - idempotent response', {
+          withdrawalId,
+          adminId: req.user.userId,
+          originalRejectedAt: withdrawal.rejectedAt
+        });
+        
+        return res.json({
+          success: true,
+          message: 'Retiro ya rechazado previamente',
+          data: {
+            withdrawalId,
+            status: 'rejected',
+            rejectedAt: withdrawal.rejectedAt,
+            idempotent: true
+          }
+        });
       }
 
       if (!['pending', 'approved'].includes(withdrawal.status)) {
@@ -537,7 +606,10 @@ router.post('/reject', adminActionLimiter, async (req, res) => {
  * POST /api/admin/withdrawals/complete
  * Mark withdrawal as completed with transaction hash
  */
-router.post('/complete', adminActionLimiter, async (req, res) => {
+router.post('/complete', 
+  captureOriginalState(Withdrawal, 'withdrawalId'),
+  auditMiddleware.withdrawalAction,
+  async (req, res) => {
   const session = await mongoose.startSession();
   
   try {
@@ -560,6 +632,28 @@ router.post('/complete', adminActionLimiter, async (req, res) => {
 
       if (!withdrawal) {
         throw new Error('WITHDRAWAL_NOT_FOUND');
+      }
+
+      // Check idempotency - if already completed, return success without changes
+      if (withdrawal.status === 'completed') {
+        logger.info('Withdrawal already completed - idempotent response', {
+          withdrawalId,
+          adminId: req.user.userId,
+          originalCompletedAt: withdrawal.completedAt,
+          existingTxHash: withdrawal.txHash
+        });
+        
+        return res.json({
+          success: true,
+          message: 'Retiro ya completado previamente',
+          data: {
+            withdrawalId,
+            status: 'completed',
+            completedAt: withdrawal.completedAt,
+            txHash: withdrawal.txHash,
+            idempotent: true
+          }
+        });
       }
 
       if (withdrawal.status !== 'approved') {
@@ -735,7 +829,7 @@ router.get('/stats/summary', async (req, res) => {
     ]);
 
     // Get recent activity (last 30 days)
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(Date.now() - DecimalCalc.multiply(30, 24 * 60 * 60 * 1000));
     const recentStats = await Withdrawal.aggregate([
       {
         $match: {
@@ -768,6 +862,234 @@ router.get('/stats/summary', async (req, res) => {
       adminId: req.user?.userId
     });
 
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/withdrawals/:id/approve
+ * Approve a withdrawal request (RESTful endpoint)
+ */
+router.patch('/:id/approve', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { eta, adminNotes } = req.body;
+    
+    const withdrawal = await Withdrawal.findOne({ withdrawalId: id }).populate('userId');
+    
+    if (!withdrawal) {
+      return res.status(404).json({
+        success: false,
+        message: 'Retiro no encontrado',
+        code: 'WITHDRAWAL_NOT_FOUND'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'El retiro no está en estado pendiente',
+        code: 'WITHDRAWAL_NOT_PENDING'
+      });
+    }
+    
+    withdrawal.status = 'approved';
+    withdrawal.approvedAt = new Date();
+    withdrawal.approvedBy = req.user._id;
+    
+    if (eta) {
+      withdrawal.processingETA = new Date(eta);
+    }
+    
+    if (adminNotes) {
+      withdrawal.adminNotes = adminNotes;
+    }
+    
+    await withdrawal.save();
+    
+    logger.info('Withdrawal approved via PATCH', {
+      withdrawalId: id,
+      adminId: req.user.userId,
+      eta,
+      adminNotes
+    });
+    
+    res.json({ success: true });
+    
+  } catch (error) {
+    logger.error('PATCH approve withdrawal error:', {
+      error: error.message,
+      withdrawalId: req.params.id,
+      adminId: req.user?.userId
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/withdrawals/:id/reject
+ * Reject a withdrawal request (RESTful endpoint)
+ */
+router.patch('/:id/reject', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, adminNotes } = req.body;
+    
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'Motivo de rechazo requerido',
+        code: 'REASON_REQUIRED'
+      });
+    }
+    
+    const withdrawal = await Withdrawal.findOne({ withdrawalId: id }).populate('userId');
+    
+    if (!withdrawal) {
+      return res.status(404).json({
+        success: false,
+        message: 'Retiro no encontrado',
+        code: 'WITHDRAWAL_NOT_FOUND'
+      });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'El retiro no está en estado pendiente',
+        code: 'WITHDRAWAL_NOT_PENDING'
+      });
+    }
+    
+    withdrawal.status = 'rejected';
+    withdrawal.rejectedAt = new Date();
+    withdrawal.rejectedBy = req.user.userId;
+    withdrawal.rejectionReason = reason;
+    
+    if (adminNotes) {
+      withdrawal.adminNotes = adminNotes;
+    }
+    
+    await withdrawal.save();
+    
+    logger.info('Withdrawal rejected via PATCH', {
+      withdrawalId: id,
+      adminId: req.user.userId,
+      reason,
+      adminNotes
+    });
+    
+    res.json({ success: true });
+    
+  } catch (error) {
+    logger.error('PATCH reject withdrawal error:', {
+      error: error.message,
+      withdrawalId: req.params.id,
+      adminId: req.user?.userId
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+      code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/withdrawals/:id/mark-paid
+ * Mark a withdrawal as paid (RESTful endpoint)
+ */
+router.patch('/:id/mark-paid', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { txHash, paidAt, adminNotes } = req.body;
+    
+    if (!txHash) {
+      return res.status(400).json({
+        success: false,
+        message: 'Hash de transacción requerido',
+        code: 'TX_HASH_REQUIRED'
+      });
+    }
+    
+    const withdrawal = await Withdrawal.findOne({ withdrawalId: id }).populate('userId');
+    
+    if (!withdrawal) {
+      return res.status(404).json({
+        success: false,
+        message: 'Retiro no encontrado',
+        code: 'WITHDRAWAL_NOT_FOUND'
+      });
+    }
+    
+    if (withdrawal.status !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: 'El retiro debe estar aprobado para marcarlo como pagado',
+        code: 'WITHDRAWAL_NOT_APPROVED'
+      });
+    }
+    
+    withdrawal.status = 'PAID'; // Normalized to uppercase
+    withdrawal.completedAt = paidAt ? new Date(paidAt) : new Date();
+    withdrawal.txHash = txHash;
+    withdrawal.processedBy = req.user._id; // Keep for legacy compatibility
+    withdrawal.processedByUserId = req.user.userId; // New canonical field (USR_...)
+    
+    if (adminNotes) {
+      withdrawal.adminNotes = adminNotes;
+    }
+    
+    // Create negative ledger entry for withdrawal
+    const Ledger = require('../models/Ledger');
+    await Ledger.create({
+      userId: withdrawal.userId._id,
+      type: 'WITHDRAWAL',
+      amount: -Math.abs(withdrawal.amount), // Ensure negative
+      currency: 'USDT',
+      description: `Withdrawal paid - ${txHash}`,
+      referenceId: withdrawal.withdrawalId,
+      referenceType: 'Withdrawal',
+      metadata: {
+        txHash,
+        processedBy: req.user.userId,
+        paidAt: withdrawal.completedAt
+      }
+    });
+    
+    await withdrawal.save();
+    
+    logger.info('Withdrawal marked as paid via PATCH', {
+      withdrawalId: id,
+      adminId: req.user.userId,
+      txHash,
+      paidAt,
+      adminNotes
+    });
+    
+    res.json({ success: true });
+    
+  } catch (error) {
+    logger.error('PATCH mark-paid withdrawal error:', {
+      error: error.message,
+      stack: error.stack,
+      withdrawalId: req.params.id,
+      adminId: req.user?.userId,
+      requestBody: req.body
+    });
+    
+    console.error('Full error details:', error);
+    
     res.status(500).json({
       success: false,
       message: 'Error interno del servidor',

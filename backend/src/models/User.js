@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const { DecimalCalc } = require('../utils/decimal');
+const CacheInvalidationService = require('../services/cacheInvalidationService');
 
 const userSchema = new mongoose.Schema({
   // Basic Information
@@ -55,6 +57,25 @@ const userSchema = new mongoose.Schema({
     default: 'user'
   },
   
+  // Special Parent Status (separate from role)
+  specialParentStatus: {
+    type: String,
+    enum: ['none', 'special_parent'],
+    default: 'none'
+  },
+  specialParentCode: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  specialParentAssignedAt: {
+    type: Date
+  },
+  specialParentAssignedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  
   // Telegram Integration
   telegramChatId: {
     type: String,
@@ -63,6 +84,44 @@ const userSchema = new mongoose.Schema({
   telegramUsername: {
     type: String,
     sparse: true
+  },
+  telegramVerified: {
+    type: Boolean,
+    default: false
+  },
+  telegramVerifiedAt: {
+    type: Date
+  },
+  
+  // User Settings
+  defaultWithdrawalAddress: {
+    type: String,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        if (!v) return true; // Optional field
+        // BEP20 address validation (42 chars, starts with 0x)
+        return /^0x[a-fA-F0-9]{40}$/.test(v);
+      },
+      message: 'Invalid BEP20 address format'
+    }
+  },
+  network: {
+    type: String,
+    default: 'BEP20',
+    enum: ['BEP20']
+  },
+  defaultWithdrawalAddress: {
+    type: String,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        if (!v) return true; // Optional field
+        // BEP20 address validation (42 chars, starts with 0x)
+        return /^0x[a-fA-F0-9]{40}$/.test(v);
+      },
+      message: 'Invalid BEP20 address format'
+    }
   },
   
   // Referral System
@@ -84,34 +143,34 @@ const userSchema = new mongoose.Schema({
   
   // Financial Information
   totalInvested: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     default: 0,
     min: 0
   },
   totalEarnings: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     default: 0,
     min: 0
   },
   availableBalance: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     default: 0,
     min: 0
   },
   totalWithdrawn: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     default: 0,
     min: 0
   },
   
   // Commission Tracking
   totalCommissions: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     default: 0,
     min: 0
   },
   availableCommissions: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     default: 0,
     min: 0
   },
@@ -140,6 +199,12 @@ const userSchema = new mongoose.Schema({
   },
   emailVerificationExpires: {
     type: Date
+  },
+  
+  // Session Management
+  tokenVersion: {
+    type: Number,
+    default: 0
   },
   
   // Metadata
@@ -171,6 +236,8 @@ userSchema.index({ email: 1 });
 userSchema.index({ userId: 1 });
 userSchema.index({ referralCode: 1 });
 userSchema.index({ telegramChatId: 1 }, { sparse: true });
+userSchema.index({ specialParentStatus: 1 });
+userSchema.index({ specialParentCode: 1 }, { sparse: true });
 userSchema.index({ createdAt: 1 });
 
 // Virtual for account lock status
@@ -228,6 +295,12 @@ userSchema.methods.resetLoginAttempts = function() {
   });
 };
 
+// Method to invalidate all user tokens
+userSchema.methods.invalidateTokens = function() {
+  this.tokenVersion += 1;
+  return this.save();
+};
+
 // Static method to find by email
 userSchema.statics.findByEmail = function(email) {
   return this.findOne({ email: email.toLowerCase() });
@@ -236,6 +309,25 @@ userSchema.statics.findByEmail = function(email) {
 // Static method to find by referral code
 userSchema.statics.findByReferralCode = function(code) {
   return this.findOne({ referralCode: code.toUpperCase() });
+};
+
+// Method to update user balance
+userSchema.methods.updateBalance = function(currency, amount, reason = 'balance_update') {
+  if (currency === 'USDT') {
+    // Convert Decimal128 to number for calculation
+    const currentBalance = parseFloat(this.availableBalance.toString()) || 0;
+    const newBalance = DecimalCalc.max(0, DecimalCalc.add(currentBalance, amount)); // Ensure balance doesn't go negative
+    
+    this.availableBalance = mongoose.Types.Decimal128.fromString(newBalance.toString());
+    
+    // Invalidate user cache after balance update
+    const userId = this._id.toString();
+    CacheInvalidationService.invalidateBalanceCache(userId);
+    
+    return this.save();
+  }
+  
+  throw new Error(`Unsupported currency: ${currency}`);
 };
 
 module.exports = mongoose.model('User', userSchema);

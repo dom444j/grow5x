@@ -1,11 +1,11 @@
 import React from 'react'
-import Header from '../components/Header'
-import Footer from '../components/Footer'
+import UserHeader from '../components/home/UserHeader'
+import Footer from '../components/home/Footer'
 
 const Terms = () => {
   return (
     <div className="min-h-screen">
-      <Header />
+      <UserHeader />
       <main className="section-padding bg-white">
         <div className="container-max max-w-4xl">
           <div className="text-center mb-12">
@@ -21,9 +21,9 @@ const Terms = () => {
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-8">
               <h2 className="text-xl font-semibold text-yellow-800 mb-3">⚠️ Aviso Importante</h2>
               <p className="text-yellow-700">
-                GrowX5 es una plataforma tecnológica descentralizada que proporciona herramientas automatizadas para la gestión de capital de riesgo. 
-                No somos una entidad financiera regulada, banco o asesor de inversiones. Operamos exclusivamente como proveedor de tecnología.
-                Al utilizar nuestros servicios, usted asume completamente todos los riesgos asociados.
+                GrowX5 es una plataforma tecnológica descentralizada que proporciona herramientas automatizadas de gestión mediante algoritmos de IA. 
+                No somos una entidad financiera regulada, banco o asesor de inversiones. Operamos exclusivamente como proveedor de tecnología y herramientas digitales.
+                Al utilizar nuestros servicios, usted asume completamente todos los riesgos tecnológicos asociados.
               </p>
             </div>
 
@@ -38,12 +38,12 @@ const Terms = () => {
             <section className="mb-8">
               <h2 className="text-2xl font-bold text-secondary-800 mb-4">2. Descripción del Servicio</h2>
               <p className="text-secondary-600 mb-4">
-                GrowX5 proporciona herramientas automatizadas para la gestión de capital de riesgo a través de algoritmos y sistemas tecnológicos. 
-                Toda la información es únicamente con fines informativos. No ofrecemos asesoramiento financiero personalizado.
+                GrowX5 proporciona herramientas automatizadas de gestión a través de algoritmos de IA y sistemas tecnológicos. 
+                Toda la información es únicamente con fines informativos. No ofrecemos asesoramiento financiero personalizado ni recomendaciones de inversión.
               </p>
               <ul className="list-disc list-inside text-secondary-600 space-y-2 mb-4">
-                <li>Gestión automatizada de capital a través de algoritmos sin intervención humana directa</li>
-                <li>Herramientas tecnológicas para análisis de mercado</li>
+                <li>Herramientas automatizadas de gestión mediante algoritmos de IA sin intervención humana directa</li>
+                <li>Herramientas tecnológicas para análisis de datos</li>
                 <li>Sistema de referidos tecnológico</li>
                 <li>Procesamiento de transacciones en criptomonedas</li>
                 <li>Plataforma descentralizada y tecnológica</li>
@@ -62,16 +62,16 @@ const Terms = () => {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-2xl font-bold text-secondary-800 mb-4">4. Naturaleza de Riesgo del Capital</h2>
+              <h2 className="text-2xl font-bold text-secondary-800 mb-4">4. Naturaleza de las Herramientas Tecnológicas</h2>
               <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-4">
-                <h3 className="font-semibold text-red-800 mb-3">ADVERTENCIA DE RIESGO TOTAL</h3>
+                <h3 className="font-semibold text-red-800 mb-3">ADVERTENCIA DE RIESGO TECNOLÓGICO</h3>
                 <ul className="list-disc list-inside text-red-700 space-y-2">
-                  <li>El aporte de capital a GrowX5 constituye una inversión de alto riesgo donde el usuario asume todas las pérdidas potenciales</li>
-                  <li>Los fondos son gestionados a través de algoritmos automatizados sin intervención humana directa</li>
-                  <li>Su capital operativo está expuesto a pérdidas totales. Los usuarios deben estar preparados para perder el 100% de su capital aportado</li>
-                  <li>Solo aporte dinero que pueda permitirse perder completamente</li>
-                  <li>GrowX5 no garantiza rendimientos específicos ni resultados de inversión</li>
-                  <li>Los rendimientos pasados no predicen resultados futuros</li>
+                  <li>El uso de herramientas automatizadas de GrowX5 conlleva riesgos tecnológicos donde el usuario asume toda la responsabilidad por los resultados</li>
+                  <li>Las herramientas operan mediante algoritmos automatizados sin intervención humana directa</li>
+                  <li>Los recursos gestionados están expuestos a pérdidas totales. Los usuarios deben estar preparados para asumir el 100% de las pérdidas potenciales</li>
+                  <li>Solo utilice recursos que pueda permitirse perder completamente</li>
+                  <li>GrowX5 no garantiza resultados específicos o rendimientos de las herramientas</li>
+                  <li>Los resultados pasados no predicen resultados futuros</li>
                 </ul>
               </div>
             </section>
@@ -82,8 +82,8 @@ const Terms = () => {
                 El sistema de referidos opera bajo las siguientes condiciones:
               </p>
               <ul className="list-disc list-inside text-secondary-600 space-y-2">
-                <li><strong>Comisión Directa:</strong> 10% del monto invertido por el referido directo, pagada el día 9 del ciclo</li>
-                <li><strong>Comisión Padre:</strong> 10% del monto invertido por referidos de segundo nivel, pagada el día 17 del ciclo</li>
+                <li><strong>Comisión Directa:</strong> 10% del monto de licenciamiento de herramientas por el referido directo, pagada el día 9 del ciclo</li>
+                <li><strong>Comisión Padre:</strong> 10% del monto de licenciamiento de herramientas por referidos de segundo nivel, pagada el día 17 del ciclo</li>
                 <li>Las comisiones son únicas por referido y ciclo</li>
                 <li>No hay límite en el número de referidos</li>
               </ul>
@@ -93,7 +93,7 @@ const Terms = () => {
               <h2 className="text-2xl font-bold text-secondary-800 mb-4">6. Pagos y Retiros</h2>
               <ul className="list-disc list-inside text-secondary-600 space-y-2">
                 <li>Todos los pagos se realizan en USDT a través de la red BEP20</li>
-                <li>Los retiros tienen un monto mínimo de 50 USDT</li>
+                <li>Los retiros tienen un monto mínimo de 10 USDT</li>
                 <li>Se requiere verificación mediante PIN de Telegram para retiros</li>
                 <li>Los pagos diarios se procesan automáticamente</li>
                 <li>La plataforma se reserva el derecho de solicitar verificación adicional</li>

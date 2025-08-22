@@ -1,12 +1,15 @@
 /**
  * Unlock Commissions CRON Processor
- * Unlocks pending commissions to available status on D+9 and D+17
+ * Unlocks pending commissions to available status on D+9 and D+18
  * Runs at 03:00 UTC daily
  */
 
 const cron = require('node-cron');
 const { Commission, Transaction, User } = require('../models');
+const JobState = require('../models/JobState');
 const logger = require('../config/logger');
+const realtimeSyncService = require('../services/realtimeSyncService');
+const { invalidateCachePattern } = require('../middleware/redisCache');
 
 /**
  * Process commission unlocks for all eligible commissions
@@ -23,7 +26,7 @@ async function processCommissionUnlocks() {
     const pendingCommissions = await Commission.find({
       status: 'pending',
       unlockDate: { $lte: today }
-    }).populate('earner').populate('referredUser').populate('relatedPurchase');
+    }).populate('recipientUserId').populate('sourceUserId').populate('purchaseId');
     
     logger.info(`Found ${pendingCommissions.length} commissions ready to unlock`);
     
@@ -42,7 +45,7 @@ async function processCommissionUnlocks() {
           unlockedCount++;
           results.unlocked.push({
             commissionId: commission.commissionId,
-            earnerId: commission.earner.userId,
+            earnerId: commission.recipientUserId.userId,
             amount: commission.commissionAmount,
             currency: commission.currency,
             level: commission.level,
@@ -54,13 +57,13 @@ async function processCommissionUnlocks() {
         errorCount++;
         results.errors.push({
           commissionId: commission.commissionId,
-          earnerId: commission.earner?.userId,
+          earnerId: commission.recipientUserId?.userId,
           error: error.message
         });
         
         logger.error('Error unlocking commission:', {
           commissionId: commission.commissionId,
-          earnerId: commission.earner?.userId,
+          earnerId: commission.recipientUserId?.userId,
           error: error.message,
           stack: error.stack
         });
@@ -69,11 +72,29 @@ async function processCommissionUnlocks() {
     
     const duration = Date.now() - startTime;
     
+    // Calculate total amount unlocked
+    const totalAmount = results.unlocked.reduce((sum, item) => sum + (item.amount || 0), 0);
+    
+    // Persist metrics to JobState
+    try {
+      await JobState.updateJobState('commissions', {
+        processed: unlockedCount,
+        errors: errorCount,
+        totalAmount,
+        durationMs: duration,
+        status: errorCount > 0 ? 'error' : 'success',
+        errorMessage: errorCount > 0 ? `${errorCount} commissions failed to unlock` : null
+      });
+    } catch (jobStateError) {
+      logger.error('Failed to update JobState for commissions:', jobStateError.message);
+    }
+    
     logger.info('Commission unlock processing completed', {
       totalCommissions: pendingCommissions.length,
       unlockedCount,
       errorCount,
       duration: `${duration}ms`,
+      totalAmount,
       results
     });
     
@@ -83,14 +104,31 @@ async function processCommissionUnlocks() {
       unlockedCount,
       errorCount,
       duration,
+      totalAmount,
       results
     };
     
   } catch (error) {
+    const duration = Date.now() - startTime;
+    
+    // Persist error state to JobState
+    try {
+      await JobState.updateJobState('commissions', {
+        processed: 0,
+        errors: 1,
+        totalAmount: 0,
+        durationMs: duration,
+        status: 'error',
+        errorMessage: error.message
+      });
+    } catch (jobStateError) {
+      logger.error('Failed to update JobState for commissions error:', jobStateError.message);
+    }
+    
     logger.error('Fatal error in commission unlock processing:', {
       error: error.message,
       stack: error.stack,
-      duration: Date.now() - startTime
+      duration: `${duration}ms`
     });
     
     throw error;
@@ -112,7 +150,7 @@ async function unlockCommission(commission) {
       
       // Update user balance
       await User.findByIdAndUpdate(
-        commission.earner._id,
+        commission.recipientUserId._id,
         {
           $inc: {
             [`balances.${commission.currency}.available`]: commission.commissionAmount,
@@ -124,17 +162,53 @@ async function unlockCommission(commission) {
       
       // Create transaction record
       await Transaction.createCommissionTransaction(
-        commission.earner._id,
+        commission.recipientUserId._id,
         commission.commissionAmount,
         commission.currency,
         commission._id,
-        `Comisión desbloqueada - Nivel ${commission.level} de ${commission.referredUser.userId}`,
+        `Comisión desbloqueada - Nivel ${commission.level} de ${commission.sourceUserId.userId}`,
         session
       );
       
+      // Invalidate user cache patterns
+      try {
+        const userId = commission.recipientUserId._id.toString();
+        await invalidateCachePattern(`user:${userId}:*`);
+        await invalidateCachePattern(`dashboard:${userId}:*`);
+        await invalidateCachePattern(`me:${userId}:*`);
+        await invalidateCachePattern(`balances:${userId}:*`);
+        await invalidateCachePattern(`commissions:${userId}:*`);
+        
+        logger.debug('Cache invalidated for commission earned (cron)', {
+          userId: userId,
+          commissionId: commission.commissionId
+        });
+      } catch (cacheError) {
+        logger.warn('Failed to invalidate cache for commission earned (cron)', {
+          userId: commission.recipientUserId._id.toString(),
+          error: cacheError.message
+        });
+      }
+      
+      // Emit SSE event for commission earned
+      realtimeSyncService.sendUserUpdate(commission.recipientUserId._id.toString(), {
+        type: 'commissionEarned',
+        commission: {
+          commissionId: commission.commissionId,
+          amount: commission.commissionAmount,
+          currency: commission.currency,
+          level: commission.level,
+          referredUser: {
+            userId: commission.sourceUserId.userId,
+            email: commission.sourceUserId.email
+          },
+          unlockedAt: commission.unlockedAt
+        }
+      });
+      
       logger.info('Commission unlocked successfully', {
         commissionId: commission.commissionId,
-        earnerId: commission.earner.userId,
+        earnerId: commission.recipientUserId.userId,
         amount: commission.commissionAmount,
         currency: commission.currency,
         level: commission.level,
@@ -262,8 +336,8 @@ async function getUpcomingUnlocks(days = 7) {
         $lte: futureDate
       }
     })
-    .populate('earner', 'userId email firstName lastName')
-    .populate('referredUser', 'userId email firstName lastName')
+    .populate('recipientUserId', 'userId email firstName lastName')
+    .populate('sourceUserId', 'userId email firstName lastName')
     .sort({ unlockDate: 1 });
     
     // Group by unlock date
@@ -282,9 +356,9 @@ async function getUpcomingUnlocks(days = 7) {
       acc[dateKey].commissions.push({
         commissionId: commission.commissionId,
         earner: {
-          userId: commission.earner.userId,
-          email: commission.earner.email,
-          fullName: `${commission.earner.firstName} ${commission.earner.lastName}`
+          userId: commission.recipientUserId.userId,
+          email: commission.recipientUserId.email,
+          fullName: `${commission.recipientUserId.firstName} ${commission.recipientUserId.lastName}`
         },
         amount: commission.commissionAmount,
         currency: commission.currency,

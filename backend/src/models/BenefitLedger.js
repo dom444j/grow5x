@@ -9,11 +9,17 @@ const benefitLedgerSchema = new mongoose.Schema({
     default: () => `BEN_${uuidv4().replace(/-/g, '').substring(0, 12).toUpperCase()}`
   },
   
-  // User and Purchase Information
+  // User and License Information
   userId: {
+    type: String,
+    required: true,
+    index: true
+  },
+  licenseId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+    ref: 'License',
+    required: true,
+    index: true
   },
   purchaseId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -27,6 +33,12 @@ const benefitLedgerSchema = new mongoose.Schema({
   },
   
   // Benefit Details
+  benefitType: {
+    type: String,
+    enum: ['cashback', 'daily_benefit'],
+    required: true,
+    index: true
+  },
   amount: {
     type: Number,
     required: true,
@@ -66,8 +78,9 @@ const benefitLedgerSchema = new mongoose.Schema({
   // Status and Processing
   status: {
     type: String,
-    enum: ['pending', 'processed', 'failed', 'cancelled'],
-    default: 'processed'
+    enum: ['scheduled', 'available', 'withdrawn', 'pending', 'processed', 'failed', 'cancelled'],
+    default: 'scheduled',
+    index: true
   },
   
   processedAt: {
@@ -82,6 +95,11 @@ const benefitLedgerSchema = new mongoose.Schema({
   },
   
   // Scheduled Information
+  benefitDate: {
+    type: Date,
+    required: true,
+    index: true
+  },
   scheduledDate: {
     type: Date,
     required: true
@@ -118,6 +136,24 @@ const benefitLedgerSchema = new mongoose.Schema({
   balanceAfter: {
     type: Number,
     min: 0
+  },
+  
+  // Withdrawal Information
+  withdrawalInfo: {
+    withdrawalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Withdrawal'
+    },
+    withdrawnAt: Date,
+    transactionHash: String
+  },
+  
+  // Metadata
+  metadata: {
+    packageName: String,
+    packagePrice: Number,
+    dailyRate: Number,
+    notes: String
   }
 }, {
   timestamps: true
@@ -147,6 +183,24 @@ benefitLedgerSchema.virtual('description').get(function() {
 benefitLedgerSchema.virtual('isOverdue').get(function() {
   return this.status === 'pending' && this.scheduledDate < new Date();
 });
+
+// Method to mark as available
+benefitLedgerSchema.methods.markAsAvailable = function() {
+  this.status = 'available';
+  this.processedAt = new Date();
+  return this.save();
+};
+
+// Method to mark as withdrawn
+benefitLedgerSchema.methods.markAsWithdrawn = function(withdrawalId, transactionHash) {
+  this.status = 'withdrawn';
+  this.withdrawalInfo = {
+    withdrawalId,
+    withdrawnAt: new Date(),
+    transactionHash
+  };
+  return this.save();
+};
 
 // Method to mark as processed
 benefitLedgerSchema.methods.markAsProcessed = function(transactionId, balanceBefore, balanceAfter) {
@@ -287,6 +341,52 @@ benefitLedgerSchema.statics.getStatistics = function(options = {}) {
       }
     }
   ]);
+};
+
+// Static method to get user available balance
+benefitLedgerSchema.statics.getUserAvailableBalance = async function(userId) {
+  const result = await this.aggregate([
+    {
+      $match: {
+        userId,
+        status: 'available'
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalAmount: { $sum: '$amount' },
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+  
+  return result[0] || { totalAmount: 0, count: 0 };
+};
+
+// Static method to get upcoming benefits
+benefitLedgerSchema.statics.getUpcomingBenefits = async function(userId, days = 7) {
+  const startDate = new Date();
+  const endDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  
+  return this.find({
+    userId,
+    status: 'scheduled',
+    benefitDate: {
+      $gte: startDate,
+      $lte: endDate
+    }
+  })
+  .populate('licenseId', 'licenseId packageId')
+  .populate({
+    path: 'licenseId',
+    populate: {
+      path: 'packageId',
+      select: 'name'
+    }
+  })
+  .sort({ benefitDate: 1 })
+  .limit(50);
 };
 
 // Static method to get daily benefit summary

@@ -6,7 +6,7 @@ const dayjs = require('dayjs');
  * Desbloquea comisiones pendientes según las reglas de negocio
  * Ejecuta diariamente a las 03:00 UTC
  * - Comisiones directas: pending → available en D+9
- * - Comisiones de equipo: pending → available en D+17
+ * - Comisiones de equipo: pending → available en D+18
  */
 async function unlockCommissions() {
   try {
@@ -17,8 +17,8 @@ async function unlockCommissions() {
     // Fecha límite para comisiones directas (D+9)
     const directUnlockDate = today.subtract(9, 'days').startOf('day').toDate();
     
-    // Fecha límite para comisiones de equipo (D+17)
-    const teamUnlockDate = today.subtract(17, 'days').startOf('day').toDate();
+    // Fecha límite para comisiones de equipo (D+18)
+     const teamUnlockDate = today.subtract(18, 'days').startOf('day').toDate();
     
     let directUnlocked = 0;
     let teamUnlocked = 0;
@@ -28,7 +28,7 @@ async function unlockCommissions() {
     try {
       const directCommissions = await Commission.find({
         status: 'pending',
-        type: 'direct',
+        type: 'direct_referral',
         createdAt: { $lte: directUnlockDate }
       });
       
@@ -53,11 +53,11 @@ async function unlockCommissions() {
       logger.error('❌ Error procesando comisiones directas:', error);
     }
     
-    // Desbloquear comisiones de equipo (D+17)
+    // Desbloquear comisiones de equipo (D+18)
     try {
       const teamCommissions = await Commission.find({
         status: 'pending',
-        type: { $in: ['team', 'binary', 'leadership'] },
+        type: { $in: ['parent_bonus', 'team', 'binary'] },
         createdAt: { $lte: teamUnlockDate }
       });
       

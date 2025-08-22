@@ -1,11 +1,11 @@
 import React from 'react'
-import Header from '../components/Header'
-import Footer from '../components/Footer'
+import UserHeader from '../components/home/UserHeader'
+import Footer from '../components/home/Footer'
 
 const Privacy = () => {
   return (
     <div className="min-h-screen">
-      <Header />
+      <UserHeader />
       <main className="section-padding bg-white">
         <div className="container-max max-w-4xl">
           <div className="text-center mb-12">
@@ -42,7 +42,7 @@ const Privacy = () => {
               <ul className="list-disc list-inside text-secondary-600 space-y-2 mb-4">
                 <li>Direcciones de wallets de criptomonedas</li>
                 <li>Historial de transacciones</li>
-                <li>Montos de inversión</li>
+                <li>Montos de licenciamiento de herramientas</li>
                 <li>Información de referidos</li>
               </ul>
 

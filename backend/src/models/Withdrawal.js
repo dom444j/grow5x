@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
+const { DecimalCalc } = require('../utils/decimal');
 
 const withdrawalSchema = new mongoose.Schema({
   // Withdrawal Identification
@@ -18,9 +19,9 @@ const withdrawalSchema = new mongoose.Schema({
   
   // Withdrawal Details
   amount: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     required: true,
-    min: 50 // Minimum withdrawal amount
+    min: 10 // Minimum withdrawal amount $10 USDT
   },
   currency: {
     type: String,
@@ -35,38 +36,38 @@ const withdrawalSchema = new mongoose.Schema({
     trim: true,
     validate: {
       validator: function(v) {
-        // Basic address validation (can be enhanced for specific networks)
-        return /^0x[a-fA-F0-9]{40}$/.test(v) || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(v);
+        // Strict BEP20/EVM address validation (0x + 40 hex chars)
+        return /^0x[a-fA-F0-9]{40}$/.test(v);
       },
-      message: 'Invalid wallet address format'
+      message: 'Invalid BEP20 address format. Must be 0x followed by 40 hexadecimal characters'
     }
   },
   
   network: {
     type: String,
     required: true,
-    enum: ['BSC', 'ETH', 'POLYGON', 'BTC'],
-    default: 'BSC'
+    enum: ['BEP20', 'ETH', 'POLYGON', 'BTC'],
+    default: 'BEP20'
   },
   
   // Fee Information
   networkFee: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     required: true,
     min: 0,
     default: 1 // Default 1 USDT fee
   },
   processingFee: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     min: 0,
     default: 0
   },
   totalFees: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     min: 0
   },
   netAmount: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     min: 0
   },
   
@@ -148,6 +149,23 @@ const withdrawalSchema = new mongoose.Schema({
     ref: 'User'
   },
   
+  // ETA and Manual Processing
+  processingTargetMinutes: {
+    type: Number,
+    min: 0
+  },
+  processingETA: {
+    type: Date
+  },
+  manualProcessing: {
+    type: Boolean,
+    default: true
+  },
+  failureReason: {
+    type: String,
+    trim: true
+  },
+  
   // Notes and Comments
   userNotes: {
     type: String,
@@ -165,12 +183,12 @@ const withdrawalSchema = new mongoose.Schema({
   
   // Balance Information
   balanceBefore: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     required: true,
     min: 0
   },
   balanceAfter: {
-    type: Number,
+    type: mongoose.Schema.Types.Decimal128,
     min: 0
   },
   
@@ -212,7 +230,7 @@ const withdrawalSchema = new mongoose.Schema({
 withdrawalSchema.index({ withdrawalId: 1 });
 withdrawalSchema.index({ userId: 1, status: 1 });
 withdrawalSchema.index({ status: 1, createdAt: 1 });
-withdrawalSchema.index({ txHash: 1 }, { sparse: true });
+withdrawalSchema.index({ txHash: 1 }, { unique: true, sparse: true });
 withdrawalSchema.index({ requestedAt: 1 });
 withdrawalSchema.index({ approvedAt: 1 });
 withdrawalSchema.index({ priority: 1, status: 1 });
@@ -232,8 +250,12 @@ withdrawalSchema.virtual('isOtpExpired').get(function() {
 
 // Method to calculate fees and net amount
 withdrawalSchema.methods.calculateFees = function() {
-  this.totalFees = this.networkFee + this.processingFee;
-  this.netAmount = this.amount - this.totalFees;
+  const networkFee = parseFloat(this.networkFee.toString());
+  const processingFee = parseFloat(this.processingFee.toString());
+  const amount = parseFloat(this.amount.toString());
+  
+  this.totalFees = DecimalCalc.add(networkFee, processingFee);
+  this.netAmount = DecimalCalc.subtract(amount, this.totalFees);
   
   if (this.netAmount < 0) {
     throw new Error('Withdrawal amount is less than fees');
@@ -402,6 +424,27 @@ withdrawalSchema.statics.getStatistics = function(options = {}) {
   ]);
 };
 
+// Static method to create withdrawal
+withdrawalSchema.statics.createWithdrawal = function(userId, amount, currency, destinationAddress, network) {
+  const withdrawalId = 'WD' + Date.now() + Math.random().toString(36).substr(2, 5).toUpperCase();
+  
+  const withdrawal = new this({
+    withdrawalId,
+    userId,
+    amount,
+    currency,
+    destinationAddress,
+    network,
+    status: 'pending',
+    requestedAt: new Date(),
+    networkFee: 1, // Default BEP20 fee
+    processingFee: 0, // No processing fee for now
+    priority: 'normal'
+  });
+  
+  return withdrawal.save();
+};
+
 // Pre-save middleware to calculate fees
 withdrawalSchema.pre('save', function(next) {
   if (this.isModified('amount') || this.isModified('networkFee') || this.isModified('processingFee')) {
@@ -410,7 +453,9 @@ withdrawalSchema.pre('save', function(next) {
   
   // Calculate balance after
   if (this.isModified('balanceBefore') || this.isModified('amount')) {
-    this.balanceAfter = this.balanceBefore - this.amount;
+    const balanceBefore = parseFloat(this.balanceBefore.toString());
+    const amount = parseFloat(this.amount.toString());
+    this.balanceAfter = DecimalCalc.subtract(balanceBefore, amount);
   }
   
   next();

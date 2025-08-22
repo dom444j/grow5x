@@ -36,7 +36,7 @@ router.get('/status', async (req, res) => {
           },
           unlockCommissions: {
             name: 'Commission Unlock Processor',
-            description: 'Unlocks pending commissions on D+9 and D+17',
+            description: 'Unlocks pending commissions on D+9 and D+18',
             schedule: 'Daily at 03:00 UTC',
             status: status.unlockCommissions
           }

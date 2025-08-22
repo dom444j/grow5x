@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
-import Header from '../components/Header'
-import Footer from '../components/Footer'
+import UserHeader from '../components/home/UserHeader'
+import Footer from '../components/home/Footer'
 
 const Simulator = () => {
   const [investment, setInvestment] = useState(1000)
@@ -16,7 +16,7 @@ const Simulator = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <Header />
+      <UserHeader />
       
       <main className="section-padding">
         <div className="container-max">

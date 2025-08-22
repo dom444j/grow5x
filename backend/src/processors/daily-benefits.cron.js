@@ -64,7 +64,6 @@ async function processDailyBenefits() {
         
         // Si completó los 40 días, marcar como completada
         if (purchase.currentDay >= purchase.totalDays) {
-          purchase.status = 'completed';
           purchase.isActive = false;
           purchase.completedAt = new Date();
           logger.info(`✅ Compra ${purchase._id} completada después de 40 días`);

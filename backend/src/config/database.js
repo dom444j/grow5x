@@ -14,8 +14,8 @@ class DatabaseConnection {
 
   async connect() {
     try {
-      // Use memory database for development
-      if (process.env.NODE_ENV === 'development' && memoryDatabase) {
+      // Use memory database for development ONLY if DB_KIND is not 'atlas'
+      if (process.env.NODE_ENV === 'development' && process.env.DB_KIND !== 'atlas' && memoryDatabase) {
         await memoryDatabase.connect();
         this.isConnected = true;
         return;

@@ -11,8 +11,14 @@ const packageSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    enum: ['Starter', 'Diamond'],
+    enum: ['Starter', 'Basic', 'Standard', 'Premium', 'Gold', 'Platinum', 'Diamond'],
     unique: true
+  },
+  slug: {
+    type: String,
+    unique: true,
+    trim: true,
+    lowercase: true
   },
   
   // Pricing
@@ -25,6 +31,11 @@ const packageSchema = new mongoose.Schema({
     type: String,
     default: 'USDT',
     enum: ['USDT', 'USD']
+  },
+  network: {
+    type: String,
+    default: 'BEP20',
+    enum: ['BEP20', 'ERC20', 'TRC20']
   },
   
   // Benefits Configuration
@@ -48,35 +59,62 @@ const packageSchema = new mongoose.Schema({
     default: 5 // 5 cycles total
   },
   
-  // Commission Structure
+  // Cashback Configuration
+  cashbackRate: {
+    type: Number,
+    default: 0.125, // 12.5% diario
+    min: 0,
+    max: 1
+  },
+  cashbackDays: {
+    type: Number,
+    default: 8, // 8 días fijos
+    min: 1
+  },
+  
+  // Withdrawal SLA (objetivo para UI)
+  withdrawalSlaTargetMinutes: {
+    type: Number,
+    required: true,
+    min: 1 // En minutos
+  },
+  
+  // Referral Commission
+  referralCommissionRate: {
+    type: Number,
+    default: 0.10, // 10%
+    min: 0,
+    max: 1
+  },
+  commissionLevels: {
+    type: Number,
+    default: 1, // Solo directo
+    min: 1
+  },
+  
+  // Target Audience
+  targetAudience: {
+    type: String,
+    trim: true
+  },
+  
+  // Popular Badge
+  isPopular: {
+    type: Boolean,
+    default: false
+  },
+  
+  // Commission Structure (MVP: solo 2 niveles)
   commissionRates: {
-    level1: {
+    directReferralRate: {
       type: Number,
       default: 0.10, // 10%
       min: 0,
       max: 1
     },
-    level2: {
+    parentBonusRate: {
       type: Number,
-      default: 0.05, // 5%
-      min: 0,
-      max: 1
-    },
-    level3: {
-      type: Number,
-      default: 0.03, // 3%
-      min: 0,
-      max: 1
-    },
-    level4: {
-      type: Number,
-      default: 0.02, // 2%
-      min: 0,
-      max: 1
-    },
-    level5: {
-      type: Number,
-      default: 0.01, // 1%
+      default: 0.10, // 10%
       min: 0,
       max: 1
     }
@@ -138,6 +176,7 @@ const packageSchema = new mongoose.Schema({
 // Indexes
 packageSchema.index({ name: 1 });
 packageSchema.index({ packageId: 1 });
+packageSchema.index({ slug: 1 });
 packageSchema.index({ isActive: 1, isVisible: 1 });
 packageSchema.index({ sortOrder: 1 });
 
@@ -156,22 +195,23 @@ packageSchema.virtual('totalDurationDays').get(function() {
   return this.benefitDays * this.totalCycles;
 });
 
-// Method to calculate commission for a specific level
-packageSchema.methods.getCommissionForLevel = function(level) {
-  const levelKey = `level${level}`;
-  if (this.commissionRates[levelKey] !== undefined) {
-    return this.price * this.commissionRates[levelKey];
+// Method to calculate commission for a specific type
+packageSchema.methods.getCommissionForType = function(type) {
+  if (type === 'direct_referral') {
+    return this.price * this.commissionRates.directReferralRate;
+  }
+  if (type === 'parent_bonus') {
+    return this.price * this.commissionRates.parentBonusRate;
   }
   return 0;
 };
 
 // Method to get all commission amounts
 packageSchema.methods.getAllCommissions = function() {
-  const commissions = {};
-  for (let i = 1; i <= 5; i++) {
-    commissions[`level${i}`] = this.getCommissionForLevel(i);
-  }
-  return commissions;
+  return {
+    direct_referral: this.getCommissionForType('direct_referral'),
+    parent_bonus: this.getCommissionForType('parent_bonus')
+  };
 };
 
 // Static method to find active packages
@@ -184,8 +224,14 @@ packageSchema.statics.findByName = function(name) {
   return this.findOne({ name, isActive: true });
 };
 
-// Pre-save middleware to update revenue when totalSold changes
+// Pre-save middleware to update revenue when totalSold changes and auto-generate slug
 packageSchema.pre('save', function(next) {
+  // Auto-generate slug if not provided
+  if (!this.slug && this.name) {
+    this.slug = this.name.toLowerCase().replace(/\s+/g, '-');
+  }
+  
+  // Update revenue when totalSold changes
   if (this.isModified('totalSold')) {
     this.totalRevenue = this.totalSold * this.price;
   }

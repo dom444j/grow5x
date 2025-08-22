@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Auth State</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .debug-info { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e9; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <h1>Debug Auth State</h1>
+    <div id="auth-info"></div>
+    
+    <script>
+        // Función para obtener información del localStorage
+        function getAuthInfo() {
+            const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+            const user = localStorage.getItem('user') || localStorage.getItem('userData');
+            
+            let userObj = null;
+            if (user) {
+                try {
+                    userObj = JSON.parse(user);
+                } catch (e) {
+                    console.error('Error parsing user data:', e);
+                }
+            }
+            
+            return {
+                token: token ? token.substring(0, 20) + '...' : 'No token found',
+                user: userObj,
+                allLocalStorage: Object.keys(localStorage).reduce((acc, key) => {
+                    acc[key] = localStorage.getItem(key);
+                    return acc;
+                }, {})
+            };
+        }
+        
+        // Función para hacer una petición a /api/me
+        async function checkCurrentUser() {
+            try {
+                const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+                if (!token) {
+                    return { error: 'No token available' };
+                }
+                
+                const response = await fetch('/api/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    return { success: true, data };
+                } else {
+                    return { error: `HTTP ${response.status}: ${response.statusText}` };
+                }
+            } catch (error) {
+                return { error: error.message };
+            }
+        }
+        
+        // Mostrar información
+        async function displayInfo() {
+            const authInfo = getAuthInfo();
+            const currentUser = await checkCurrentUser();
+            
+            const container = document.getElementById('auth-info');
+            
+            container.innerHTML = `
+                <div class="debug-info">
+                    <h3>LocalStorage Auth Info:</h3>
+                    <p><strong>Token:</strong> ${authInfo.token}</p>
+                    <p><strong>User:</strong> ${authInfo.user ? JSON.stringify(authInfo.user, null, 2) : 'No user data'}</p>
+                </div>
+                
+                <div class="debug-info">
+                    <h3>Current User API Check:</h3>
+                    ${currentUser.success ? 
+                        `<div class="success">
+                            <p><strong>Status:</strong> Success</p>
+                            <p><strong>User Role:</strong> ${currentUser.data.user?.role || 'Unknown'}</p>
+                            <p><strong>User Email:</strong> ${currentUser.data.user?.email || 'Unknown'}</p>
+                            <p><strong>Full Response:</strong></p>
+                            <pre>${JSON.stringify(currentUser.data, null, 2)}</pre>
+                        </div>` :
+                        `<div class="error">
+                            <p><strong>Error:</strong> ${currentUser.error}</p>
+                        </div>`
+                    }
+                </div>
+                
+                <div class="debug-info">
+                    <h3>All LocalStorage Keys:</h3>
+                    <pre>${JSON.stringify(authInfo.allLocalStorage, null, 2)}</pre>
+                </div>
+                
+                <div class="debug-info">
+                    <h3>Current URL:</h3>
+                    <p>${window.location.href}</p>
+                </div>
+            `;
+        }
+        
+        // Ejecutar al cargar la página
+        displayInfo();
+        
+        // Botón para refrescar
+        const refreshBtn = document.createElement('button');
+        refreshBtn.textContent = 'Refresh Auth Info';
+        refreshBtn.onclick = displayInfo;
+        refreshBtn.style.marginTop = '20px';
+        refreshBtn.style.padding = '10px 20px';
+        refreshBtn.style.backgroundColor = '#2196F3';
+        refreshBtn.style.color = 'white';
+        refreshBtn.style.border = 'none';
+        refreshBtn.style.borderRadius = '5px';
+        refreshBtn.style.cursor = 'pointer';
+        document.body.appendChild(refreshBtn);
+    </script>
+</body>
+</html>

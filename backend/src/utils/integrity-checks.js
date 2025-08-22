@@ -20,14 +20,14 @@ const logger = pino({
 });
 
 /**
- * Valida que no existan referencias multinivel en el sistema
- * @throws {Error} Si encuentra configuraciones multinivel
+ * Valida que no existan referencias no autorizadas en el sistema
+ * @throws {Error} Si encuentra configuraciones no autorizadas
  */
 async function validateNoMultiLevel() {
-  logger.info('🔍 Validando integridad: Sin referencias multinivel...');
+  logger.info('🔍 Validando integridad: Sin referencias no autorizadas...');
   
   try {
-    // 1. Verificar que no existan packages con commissionRates multinivel
+    // 1. Verificar que no existan packages con commissionRates no autorizados
     const packagesWithLevels = await Package.find({
       $or: [
         { 'commissionRates.level1': { $exists: true } },
@@ -41,7 +41,7 @@ async function validateNoMultiLevel() {
     });
     
     if (packagesWithLevels.length > 0) {
-      throw new Error(`❌ INTEGRIDAD VIOLADA: Encontrados ${packagesWithLevels.length} packages con configuración multinivel. Ejecutar limpieza antes de continuar.`);
+      throw new Error(`❌ INTEGRIDAD VIOLADA: Encontrados ${packagesWithLevels.length} packages con configuración no autorizada. Ejecutar limpieza antes de continuar.`);
     }
     
     // 2. Verificar que no existan comisiones con tipos inválidos
@@ -62,7 +62,7 @@ async function validateNoMultiLevel() {
       throw new Error(`❌ INTEGRIDAD VIOLADA: Encontradas ${commissionsWithLevel.length} comisiones con campo 'level'. Este campo debe ser eliminado.`);
     }
     
-    logger.info('✅ Validación de integridad completada: Sistema limpio de referencias multinivel');
+    logger.info('✅ Validación de integridad completada: Sistema limpio de referencias no autorizadas');
     
   } catch (error) {
     logger.error('❌ Error en validación de integridad:', error.message);

@@ -154,7 +154,7 @@ const transactionSchema = new mongoose.Schema({
   // Blockchain Information (for withdrawals)
   blockchainNetwork: {
     type: String,
-    enum: ['BSC', 'ETH', 'POLYGON']
+    enum: ['BEP20', 'ETH', 'POLYGON']
   },
   confirmationBlocks: {
     type: Number,

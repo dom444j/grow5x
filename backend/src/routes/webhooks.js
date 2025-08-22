@@ -6,6 +6,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const telegramService = require('../services/telegram');
+const telegramNotify = require('../services/telegramNotify');
 const logger = require('../config/logger');
 
 const router = express.Router();
@@ -112,7 +113,7 @@ async function handleMessage(message) {
         '• Notificaciones importantes\n' +
         '• Actualizaciones del sistema\n\n' +
         '💡 <i>Para recibir códigos OTP, asegúrate de configurar tu username de Telegram en tu perfil de Grow5X.</i>\n\n' +
-        '🌐 Visita: https://grow5x.app';
+        '🌐 Visita: https://app.grow5x.app';
       
       await telegramService.sendNotification(chatId, welcomeMessage);
     }
@@ -129,7 +130,7 @@ async function handleMessage(message) {
         '🔐 Envío de códigos OTP para retiros\n' +
         '📢 Notificaciones administrativas\n' +
         '✅ Confirmaciones de transacciones\n\n' +
-        '🌐 <b>Plataforma:</b> https://grow5x.app\n' +
+        '🌐 <b>Plataforma:</b> https://app.grow5x.app\n' +
         '💬 <b>Comunidad:</b> https://t.me/grow5x_community';
       
       await telegramService.sendNotification(chatId, helpMessage);
@@ -143,9 +144,14 @@ async function handleMessage(message) {
         `🤖 <b>Bot:</b> ${status.initialized ? '✅ Activo' : '❌ Inactivo'}\n` +
         `⚙️ <b>Configurado:</b> ${status.botConfigured ? '✅ Sí' : '❌ No'}\n` +
         `🕐 <b>Última verificación:</b> ${new Date().toLocaleString('es-ES')}\n\n` +
-        '🌐 <b>Plataforma:</b> https://grow5x.app';
+        '🌐 <b>Plataforma:</b> https://app.grow5x.app';
       
       await telegramService.sendNotification(chatId, statusMessage);
+    }
+    
+    // Handle /activar command
+    else if (text && text.startsWith('/activar')) {
+      await telegramNotify.handleTelegramCommand(text, chatId, userId, username);
     }
     
     // Handle unknown commands
@@ -153,7 +159,7 @@ async function handleMessage(message) {
       const unknownMessage = 
         '❓ <b>Comando no reconocido</b>\n\n' +
         'Usa /help para ver los comandos disponibles.\n\n' +
-        '🌐 <b>Plataforma:</b> https://grow5x.app';
+        '🌐 <b>Plataforma:</b> https://app.grow5x.app';
       
       await telegramService.sendNotification(chatId, unknownMessage);
     }
